@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@theme {
+  --color-mistral-orange: #FF7000;
+  --color-mistral-orange-light: #FF8C33;
+  --color-mistral-orange-dark: #E06300;
+  --color-mistral-dark: #1a1a1a;
+  --color-mistral-darker: #0f0f0f;
+}
+
+/* Light mode defaults */
+body {
+  @apply bg-white text-gray-900 transition-colors duration-200;
+}
+
+/* Dark mode */
+.dark body {
+  background-color: var(--color-mistral-dark);
+  @apply text-gray-100;
+}
+
+/* Citation badges */
+.citation-badge {
+  @apply inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium 
+         text-white rounded cursor-pointer transition-colors;
+  background-color: var(--color-mistral-orange);
+}
+
+.citation-badge:hover {
+  background-color: var(--color-mistral-orange-light);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+.dark ::-webkit-scrollbar-track {
+  @apply bg-gray-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-gray-600;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Loading spinner */
+.spinner {
+  @apply w-5 h-5 border-2 border-gray-200 rounded-full animate-spin;
+  border-top-color: var(--color-mistral-orange);
+}
+
+/* Custom utilities */
+.bg-mistral-dark {
+  background-color: var(--color-mistral-dark);
+}
+
+.bg-mistral-darker {
+  background-color: var(--color-mistral-darker);
+}
+
+.bg-mistral-orange {
+  background-color: var(--color-mistral-orange);
+}
+
+.hover\:bg-mistral-orange-light:hover {
+  background-color: var(--color-mistral-orange-light);
+}
+
+.text-mistral-orange {
+  color: var(--color-mistral-orange);
+}
+
+.border-mistral-orange {
+  border-color: var(--color-mistral-orange);
+}
+
+.ring-mistral-orange {
+  --tw-ring-color: var(--color-mistral-orange);
+}
+
+.focus\:ring-mistral-orange:focus {
+  --tw-ring-color: var(--color-mistral-orange);
+}
