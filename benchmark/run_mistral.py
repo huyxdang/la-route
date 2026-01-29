@@ -5,13 +5,15 @@ Runs Mistral models on DocBench PDFs with full multimodal support (text + images
 
 Usage:
     python run_mistral.py --model ministral-8b-latest --start 0 --end 228
-    python run_mistral.py --model mistral-large-latest --start 0 --end 228
+    python run_mistral.py --model mistral-large-latest --start 0 --end 228 --workers 4
 """
 
 import json
 import argparse
 import logging
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dotenv import load_dotenv
 from mistralai import Mistral
@@ -37,17 +39,17 @@ MISTRAL_MODELS = {
     "mistral-large-latest": "mistral-large-latest",
 }
 
-# Cost per 1M tokens (approximate, check Mistral pricing)
+# Cost per 1M tokens (as of Jan 2026)
 MODEL_COSTS = {
-    "ministral-8b-latest": {"input": 0.1, "output": 0.1},
-    "mistral-large-latest": {"input": 2.0, "output": 6.0},
+    "ministral-8b-latest": {"input": 0.15, "output": 0.15},
+    "mistral-large-latest": {"input": 0.5, "output": 1.5},
 }
 
 
 class MistralRunner:
     """Runs Mistral models on DocBench documents with multimodal support."""
     
-    def __init__(self, model_name: str, max_images: int = 10):
+    def __init__(self, model_name: str, max_images: int = 10, workers: int = 1):
         api_key = os.getenv("MISTRAL_API_KEY")
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment")
@@ -56,12 +58,14 @@ class MistralRunner:
         self.model = MISTRAL_MODELS.get(model_name, model_name)
         self.model_short = model_name.replace("-latest", "")
         self.max_images = max_images
+        self.workers = workers
         
-        # Track costs
+        # Track costs (thread-safe)
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self._lock = threading.Lock()
         
-        logger.info(f"Initialized MistralRunner with model: {self.model}")
+        logger.info(f"Initialized MistralRunner with model: {self.model}, workers: {workers}")
     
     def get_pdf_path(self, folder: str, data_dir: str) -> Path:
         """Get the PDF path for a folder."""
@@ -139,7 +143,7 @@ class MistralRunner:
         return questions
     
     @retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
-    def call_mistral(self, doc_content: list[dict], question: str) -> str:
+    def call_mistral(self, doc_content: list[dict], question: str) -> tuple[str, int, int]:
         """Call Mistral API with document content (text + images)."""
         system_prompt = (
             "You are a helpful assistant that answers questions based on the given document. "
@@ -159,15 +163,23 @@ class MistralRunner:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ],
-            max_tokens=500,
+            max_tokens=1000,
             temperature=0.0
         )
         
+        input_tokens = 0
+        output_tokens = 0
         if hasattr(response, 'usage') and response.usage:
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
         
-        return response.choices[0].message.content.strip()
+        return response.choices[0].message.content.strip(), input_tokens, output_tokens
+    
+    def _update_tokens(self, input_tokens: int, output_tokens: int):
+        """Thread-safe token counter update."""
+        with self._lock:
+            self.total_input_tokens += input_tokens
+            self.total_output_tokens += output_tokens
     
     def run_folder(self, folder: str, data_dir: str) -> list[dict]:
         """Run all questions for a single document folder."""
@@ -187,10 +199,11 @@ class MistralRunner:
         results = []
         for i, qa in enumerate(questions):
             question = qa["question"]
-            logger.info(f"  Q{i+1}/{len(questions)}: {question[:50]}...")
+            logger.info(f"  [Folder {folder}] Q{i+1}/{len(questions)}: {question[:50]}...")
             
             try:
-                answer = self.call_mistral(doc_content, question)
+                answer, input_tokens, output_tokens = self.call_mistral(doc_content, question)
+                self._update_tokens(input_tokens, output_tokens)
             except Exception as e:
                 logger.error(f"  Error on Q{i+1}: {e}")
                 answer = ""
@@ -215,20 +228,42 @@ class MistralRunner:
         
         output_file = Path(output_dir) / f"{self.model_short}_results.jsonl"
         
-        logger.info(f"Running {self.model} on folders {start}-{end}")
+        logger.info(f"Running {self.model} on folders {start}-{end} with {self.workers} worker(s)")
         logger.info(f"Output: {output_file}")
         
+        folders = list(range(start, end + 1))
         all_results = []
+        file_lock = threading.Lock()
         
-        for folder in range(start, end + 1):
+        def process_folder(folder: int) -> list[dict]:
             logger.info(f"Processing folder {folder}/{end}")
             results = self.run_folder(folder, data_dir)
-            all_results.extend(results)
             
-            # Append results incrementally
-            with open(output_file, 'a') as f:
-                for result in results:
-                    f.write(json.dumps(result) + '\n')
+            # Thread-safe file write
+            with file_lock:
+                with open(output_file, 'a') as f:
+                    for result in results:
+                        f.write(json.dumps(result) + '\n')
+            
+            return results
+        
+        if self.workers == 1:
+            # Sequential processing
+            for folder in folders:
+                results = process_folder(folder)
+                all_results.extend(results)
+        else:
+            # Parallel processing
+            with ThreadPoolExecutor(max_workers=self.workers) as executor:
+                futures = {executor.submit(process_folder, folder): folder for folder in folders}
+                
+                for future in as_completed(futures):
+                    folder = futures[future]
+                    try:
+                        results = future.result()
+                        all_results.extend(results)
+                    except Exception as e:
+                        logger.error(f"Folder {folder} failed: {e}")
         
         self.print_cost_summary()
         
@@ -288,12 +323,19 @@ def main():
         default=10,
         help="Maximum images per document (default: 10)"
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Number of parallel workers (default: 1)"
+    )
     
     args = parser.parse_args()
     
     runner = MistralRunner(
         model_name=args.model,
-        max_images=args.max_images
+        max_images=args.max_images,
+        workers=args.workers
     )
     runner.run(
         data_dir=args.data_dir,
