@@ -4,8 +4,20 @@ Mistral API runner for DocBench benchmark.
 Runs Mistral models on DocBench PDFs with full multimodal support (text + images).
 
 Usage:
-    python run_mistral.py --model ministral-8b-latest --start 0 --end 228
-    python run_mistral.py --model mistral-large-latest --start 0 --end 228 --workers 4
+(1) Run the first time / fresh start:
+    python run_mistral.py --model ministral-8b-latest --start 0 --end 228  
+    python run_mistral.py --model mistral-large-latest --start 0 --end 228 --workers 2 --no-resume
+
+(2) Resume from previous run:
+    python run_mistral.py --model ministral-8b-latest --start 0 --end 228 
+    python run_mistral.py --model mistral-large-latest --start 0 --end 228 --workers 2
+
+(3) Run by domain (smaller subsets):
+    python run_mistral.py --model ministral-8b-latest --domain academic    # 49 docs
+    python run_mistral.py --model ministral-8b-latest --domain finance    # 40 docs
+    python run_mistral.py --model ministral-8b-latest --domain government # 44 docs
+    python run_mistral.py --model ministral-8b-latest --domain legal      # 46 docs
+    python run_mistral.py --model ministral-8b-latest --domain news       # 50 docs
 """
 
 import json
@@ -20,6 +32,12 @@ from mistralai import Mistral
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from pdf_extract import extract_pdf
+from chunking import (
+    estimate_doc_tokens, 
+    SemanticChunker, 
+    ChunkRetriever, 
+    build_rag_content
+)
 
 # Load environment variables
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -45,11 +63,30 @@ MODEL_COSTS = {
     "mistral-large-latest": {"input": 0.5, "output": 1.5},
 }
 
+# Token threshold for switching to RAG (leaves room for images + response)
+TOKEN_THRESHOLD = 150_000
+
+# DocBench domain mappings (folder number ranges)
+DOMAINS = {
+    'academic': range(0, 49),      # 49 docs (folders 0-48)
+    'finance': range(49, 89),      # 40 docs (folders 49-88)
+    'government': range(89, 133),  # 44 docs (folders 89-132)
+    'legal': range(133, 179),      # 46 docs (folders 133-178)
+    'news': range(179, 229),       # 50 docs (folders 179-228)
+}
+
+
+def get_domain_folders(domain: str) -> list[int]:
+    """Get list of folder numbers for a given domain."""
+    if domain not in DOMAINS:
+        raise ValueError(f"Unknown domain: {domain}. Choose from: {list(DOMAINS.keys())}")
+    return list(DOMAINS[domain])
+
 
 class MistralRunner:
     """Runs Mistral models on DocBench documents with multimodal support."""
     
-    def __init__(self, model_name: str, max_images: int = 10, workers: int = 1):
+    def __init__(self, model_name: str, max_images: int = 8, min_image_size: int = 200, workers: int = 1):
         api_key = os.getenv("MISTRAL_API_KEY")
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment")
@@ -58,7 +95,11 @@ class MistralRunner:
         self.model = MISTRAL_MODELS.get(model_name, model_name)
         self.model_short = model_name.replace("-latest", "")
         self.max_images = max_images
+        self.min_image_size = min_image_size
         self.workers = workers
+        
+        # Semantic chunker for large documents (lazy init)
+        self._chunker = None
         
         # Track costs (thread-safe)
         self.total_input_tokens = 0
@@ -66,6 +107,13 @@ class MistralRunner:
         self._lock = threading.Lock()
         
         logger.info(f"Initialized MistralRunner with model: {self.model}, workers: {workers}")
+    
+    @property
+    def chunker(self) -> SemanticChunker:
+        """Lazy-init semantic chunker (makes API calls for embeddings)."""
+        if self._chunker is None:
+            self._chunker = SemanticChunker()
+        return self._chunker
     
     def get_pdf_path(self, folder: str, data_dir: str) -> Path:
         """Get the PDF path for a folder."""
@@ -78,7 +126,7 @@ class MistralRunner:
     def get_document_content(self, folder: str, data_dir: str) -> list[dict]:
         """Extract text and images from PDF."""
         pdf_path = self.get_pdf_path(folder, data_dir)
-        doc = extract_pdf(str(pdf_path))
+        doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size)
         
         content = []
         
@@ -124,6 +172,15 @@ class MistralRunner:
         if image_count > 0:
             logger.info(f"  Included {image_count} image(s)")
         
+        # Log content size for debugging
+        total_text_len = sum(len(c.get("text", "")) for c in content if c.get("type") == "text")
+        total_images = sum(1 for c in content if c.get("type") == "image_url")
+        total_image_bytes = sum(
+            len(c.get("image_url", {}).get("url", "")) 
+            for c in content if c.get("type") == "image_url"
+        )
+        logger.debug(f"  Content: {total_text_len} chars text, {total_images} images, ~{total_image_bytes//1024}KB image data")
+        
         return content
     
     def get_questions(self, folder: str, data_dir: str) -> list[dict]:
@@ -143,7 +200,7 @@ class MistralRunner:
         return questions
     
     @retry(wait=wait_exponential(min=1, max=60), stop=stop_after_attempt(5))
-    def call_mistral(self, doc_content: list[dict], question: str) -> tuple[str, int, int]:
+    def call_mistral(self, doc_content: list[dict], question: str, folder: str = "") -> tuple[str, int, int]:
         """Call Mistral API with document content (text + images)."""
         system_prompt = (
             "You are a helpful assistant that answers questions based on the given document. "
@@ -157,15 +214,23 @@ class MistralRunner:
             "text": f"\n## Question:\n{question}\n\nAnswer:"
         })
         
-        response = self.client.chat.complete(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ],
-            max_tokens=1000,
-            temperature=0.0
-        )
+        try:
+            response = self.client.chat.complete(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                max_tokens=1000,
+                temperature=0.0
+            )
+        except Exception as e:
+            # Log detailed error info
+            logger.error(f"  API Error in folder {folder}: {type(e).__name__}: {e}")
+            num_images = sum(1 for c in doc_content if c.get("type") == "image_url")
+            total_bytes = sum(len(c.get("image_url", {}).get("url", "")) for c in doc_content if c.get("type") == "image_url")
+            logger.error(f"  Request had {num_images} images, ~{total_bytes//1024}KB image data")
+            raise
         
         input_tokens = 0
         output_tokens = 0
@@ -181,8 +246,17 @@ class MistralRunner:
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
     
-    def run_folder(self, folder: str, data_dir: str) -> list[dict]:
-        """Run all questions for a single document folder."""
+    def run_folder(self, folder: str, data_dir: str, skip_questions: set[str] = None) -> list[dict]:
+        """Run all questions for a single document folder.
+        
+        Args:
+            folder: Folder number/name
+            data_dir: Data directory path
+            skip_questions: Set of question strings to skip (already completed)
+        """
+        if skip_questions is None:
+            skip_questions = set()
+        
         folder_path = Path(data_dir) / str(folder)
         
         if not folder_path.exists():
@@ -191,21 +265,61 @@ class MistralRunner:
         
         try:
             questions = self.get_questions(folder, data_dir)
-            doc_content = self.get_document_content(folder, data_dir)
+            pdf_path = self.get_pdf_path(folder, data_dir)
+            doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size)
         except FileNotFoundError as e:
             logger.error(f"Skipping folder {folder}: {e}")
             return []
         
+        # Filter out already completed questions
+        remaining_questions = [qa for qa in questions if qa["question"] not in skip_questions]
+        
+        if not remaining_questions:
+            logger.info(f"  All {len(questions)} questions already completed, skipping")
+            return []
+        
+        if skip_questions:
+            logger.info(f"  Skipping {len(skip_questions)} completed, {len(remaining_questions)} remaining")
+        
+        # Check document size and decide routing
+        doc_tokens = estimate_doc_tokens(doc)
+        use_rag = doc_tokens >= TOKEN_THRESHOLD
+        
+        if use_rag:
+            logger.info(f"  Large doc ({doc_tokens:,} tokens) - using RAG mode")
+            try:
+                chunked_doc = self.chunker.chunk_document(doc)
+                retriever = ChunkRetriever(chunked_doc)
+                logger.info(f"  Created {len(chunked_doc.chunks)} chunks")
+            except Exception as e:
+                logger.error(f"  Failed to chunk document: {e}")
+                return []
+        else:
+            logger.info(f"  Small doc ({doc_tokens:,} tokens) - using full doc mode")
+            doc_content = self.get_document_content(folder, data_dir)
+            retriever = None
+        
         results = []
-        for i, qa in enumerate(questions):
+        for i, qa in enumerate(remaining_questions):
             question = qa["question"]
-            logger.info(f"  [Folder {folder}] Q{i+1}/{len(questions)}: {question[:50]}...")
+            logger.info(f"  [Folder {folder}] Q{i+1}/{len(remaining_questions)}: {question[:50]}...")
             
             try:
-                answer, input_tokens, output_tokens = self.call_mistral(doc_content, question)
+                if use_rag and retriever:
+                    # RAG mode: retrieve relevant chunks + page images
+                    chunks, pages = retriever.retrieve(question)
+                    rag_content = build_rag_content(chunks, doc, pages, self.max_images)
+                    answer, input_tokens, output_tokens = self.call_mistral(
+                        rag_content, question, folder=folder
+                    )
+                else:
+                    # Full doc mode
+                    answer, input_tokens, output_tokens = self.call_mistral(
+                        doc_content, question, folder=folder
+                    )
                 self._update_tokens(input_tokens, output_tokens)
             except Exception as e:
-                logger.error(f"  Error on Q{i+1}: {e}")
+                logger.error(f"  Error on folder {folder} Q{i+1}: {e}")
                 answer = ""
             
             result = {
@@ -215,29 +329,92 @@ class MistralRunner:
                 "type": qa.get("type", ""),
                 "sys_ans": answer,
                 "file": str(folder),
-                "model": self.model
+                "model": self.model,
+                "mode": "rag" if use_rag else "full"
             }
             results.append(result)
         
         return results
     
-    def run(self, data_dir: str, start: int, end: int, output_dir: str = None):
-        """Run benchmark on all folders from start to end."""
+    def load_completed(self, output_file: Path) -> dict[str, set[str]]:
+        """
+        Load already completed question+folder pairs from results file.
+        
+        Returns:
+            Dict mapping folder -> set of completed questions (with non-empty answers)
+        """
+        completed = {}
+        
+        if not output_file.exists():
+            return completed
+        
+        with open(output_file, 'r') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    result = json.loads(line)
+                    folder = str(result.get("file", ""))
+                    question = result.get("question", "")
+                    answer = result.get("sys_ans", "")
+                    
+                    # Only count as completed if answer is non-empty
+                    if folder and question and answer:
+                        if folder not in completed:
+                            completed[folder] = set()
+                        completed[folder].add(question)
+                except json.JSONDecodeError:
+                    continue
+        
+        return completed
+    
+    def run(self, data_dir: str, start: int, end: int, output_dir: str = None, resume: bool = True, domain: str = None):
+        """Run benchmark on all folders from start to end.
+        
+        Args:
+            data_dir: Directory containing document folders
+            start: Starting folder number
+            end: Ending folder number
+            output_dir: Output directory (default: same as data_dir)
+            resume: If True, skip already completed questions (default: True)
+            domain: Filter by domain (academic, finance, government, legal, news)
+        """
         if output_dir is None:
             output_dir = data_dir
         
         output_file = Path(output_dir) / f"{self.model_short}_results.jsonl"
         
-        logger.info(f"Running {self.model} on folders {start}-{end} with {self.workers} worker(s)")
-        logger.info(f"Output: {output_file}")
+        # Filter by domain if specified
+        if domain:
+            domain_folders = get_domain_folders(domain)
+            folders = [f for f in range(start, end + 1) if f in domain_folders]
+            logger.info(f"Filtering by domain '{domain}': {len(folders)} folders")
+        else:
+            folders = list(range(start, end + 1))
         
-        folders = list(range(start, end + 1))
+        if not folders:
+            logger.warning(f"No folders to process (domain filter may have excluded all)")
+            return []
+        
+        # Load existing progress
+        completed = {}
+        if resume and output_file.exists():
+            completed = self.load_completed(output_file)
+            total_completed = sum(len(qs) for qs in completed.values())
+            logger.info(f"Resuming: found {total_completed} completed questions in {len(completed)} folders")
+        
+        max_folder = max(folders) if folders else end
+        logger.info(f"Running {self.model} on {len(folders)} folders (range {min(folders)}-{max_folder}) with {self.workers} worker(s)")
+        logger.info(f"Output: {output_file}")
         all_results = []
         file_lock = threading.Lock()
         
         def process_folder(folder: int) -> list[dict]:
-            logger.info(f"Processing folder {folder}/{end}")
-            results = self.run_folder(folder, data_dir)
+            folder_str = str(folder)
+            completed_qs = completed.get(folder_str, set())
+            
+            logger.info(f"Processing folder {folder}/{max_folder}")
+            results = self.run_folder(folder, data_dir, skip_questions=completed_qs)
             
             # Thread-safe file write
             with file_lock:
@@ -320,8 +497,14 @@ def main():
     parser.add_argument(
         "--max-images",
         type=int,
-        default=10,
-        help="Maximum images per document (default: 10)"
+        default=8,
+        help="Maximum images per document (default: 8, API limit)"
+    )
+    parser.add_argument(
+        "--min-image-size",
+        type=int,
+        default=200,
+        help="Minimum image dimension in pixels to include (default: 200, filters out icons)"
     )
     parser.add_argument(
         "--workers",
@@ -329,19 +512,33 @@ def main():
         default=1,
         help="Number of parallel workers (default: 1)"
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Start fresh, don't resume from previous progress"
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        choices=list(DOMAINS.keys()),
+        help="Filter by domain: academic (49 docs), finance (40 docs), government (44 docs), legal (46 docs), news (50 docs)"
+    )
     
     args = parser.parse_args()
     
     runner = MistralRunner(
         model_name=args.model,
         max_images=args.max_images,
+        min_image_size=args.min_image_size,
         workers=args.workers
     )
     runner.run(
         data_dir=args.data_dir,
         start=args.start,
         end=args.end,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        resume=not args.no_resume,
+        domain=args.domain
     )
 
 

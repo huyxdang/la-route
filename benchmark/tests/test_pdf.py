@@ -3,19 +3,24 @@ Test PDF extraction and Mistral vision on a sample document.
 Runs multiple prompts to explore the model's understanding.
 
 Usage:
-    python test_pdf.py                          # Uses folder 1's PDF
-    python test_pdf.py data/0/P19-1598.pdf      # Custom PDF path
-    python test_pdf.py --model ministral-8b-latest  # Use smaller model
+    python test_pdf.py                          # Uses folder 1's PDF with Large
+    python test_pdf.py ../data/0/P19-1598.pdf   # Custom PDF path
+    python test_pdf.py -m 8b                    # Use Ministral 8B
+    python test_pdf.py ../data/2/P19-1164.pdf -m 8b  # Custom PDF + 8B
 """
 
 import os
 import sys
 from pathlib import Path
+
+# Add parent dir to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
 from mistralai import Mistral
 from pdf_extract import extract_pdf, get_document_summary
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 # Test prompts to explore document understanding
@@ -125,22 +130,38 @@ def build_doc_content(doc, max_images: int = 10) -> list[dict]:
 
 
 def main():
-    # Parse args
-    pdf_path = "data/1/W18-4401.pdf"
-    model = "mistral-large-latest"
+    import argparse
     
-    for arg in sys.argv[1:]:
-        if arg.startswith("--model="):
-            model = arg.split("=")[1]
-        elif arg.startswith("--model"):
-            continue
-        elif not arg.startswith("-"):
-            pdf_path = arg
+    MODELS = {
+        "large": "mistral-large-latest",
+        "mistral-large": "mistral-large-latest",
+        "mistral-large-latest": "mistral-large-latest",
+        "8b": "ministral-8b-latest",
+        "ministral-8b": "ministral-8b-latest",
+        "ministral-8b-latest": "ministral-8b-latest",
+    }
     
-    if "--model" in sys.argv:
-        idx = sys.argv.index("--model")
-        if idx + 1 < len(sys.argv):
-            model = sys.argv[idx + 1]
+    # Default PDF path relative to benchmark/
+    default_pdf = str(Path(__file__).parent.parent / "data/1/W18-4401.pdf")
+    
+    parser = argparse.ArgumentParser(description="Test PDF with multiple prompts")
+    parser.add_argument(
+        "pdf_path",
+        nargs="?",
+        default=default_pdf,
+        help="Path to PDF file"
+    )
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        default="large",
+        choices=list(MODELS.keys()),
+        help="Model to use: large or 8b (default: large)"
+    )
+    
+    args = parser.parse_args()
+    pdf_path = args.pdf_path
+    model = MODELS[args.model]
     
     print(f"\n{'='*70}")
     print(f"  PDF Test: {pdf_path}")

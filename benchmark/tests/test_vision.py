@@ -1,14 +1,19 @@
 """
-Test vision capabilities with Mistral Large on a PDF.
+Test vision capabilities with Mistral models on a PDF.
 """
 
 import os
+import sys
 from pathlib import Path
+
+# Add parent dir to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
 from mistralai import Mistral
 from pdf_extract import extract_pdf, get_document_summary, build_mistral_content
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 
 def test_image_description(pdf_path: str, model: str = "mistral-large-latest"):
@@ -109,9 +114,39 @@ Number your descriptions to match the image order."""
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
     
-    pdf_path = sys.argv[1] if len(sys.argv) > 1 else "data/1/W18-4401.pdf"
-    model = sys.argv[2] if len(sys.argv) > 2 else "mistral-large-latest"
+    MODELS = {
+        "large": "mistral-large-latest",
+        "mistral-large": "mistral-large-latest",
+        "mistral-large-latest": "mistral-large-latest",
+        "8b": "ministral-8b-latest",
+        "ministral-8b": "ministral-8b-latest",
+        "ministral-8b-latest": "ministral-8b-latest",
+        "pixtral": "pixtral-12b-latest",
+        "pixtral-12b": "pixtral-12b-latest",
+        "pixtral-12b-latest": "pixtral-12b-latest",
+    }
     
-    test_image_description(pdf_path, model)
+    # Default PDF path relative to benchmark/
+    default_pdf = str(Path(__file__).parent.parent / "data/1/W18-4401.pdf")
+    
+    parser = argparse.ArgumentParser(description="Test vision capabilities on a PDF")
+    parser.add_argument(
+        "pdf_path",
+        nargs="?",
+        default=default_pdf,
+        help="Path to PDF file"
+    )
+    parser.add_argument(
+        "--model", "-m",
+        type=str,
+        default="mistral-large-latest",
+        choices=list(MODELS.keys()),
+        help="Model to use: large, 8b, or pixtral (default: large)"
+    )
+    
+    args = parser.parse_args()
+    model = MODELS[args.model]
+    
+    test_image_description(args.pdf_path, model)

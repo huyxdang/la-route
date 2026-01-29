@@ -43,7 +43,7 @@ class ExtractedDocument:
     total_text_length: int
     
 
-def extract_pdf(pdf_path: str, extract_images: bool = True) -> ExtractedDocument:
+def extract_pdf(pdf_path: str, extract_images: bool = True, min_image_size: int = 0) -> ExtractedDocument:
     """
     Extract text and images from a PDF.
     
@@ -111,15 +111,20 @@ def extract_pdf(pdf_path: str, extract_images: bool = True) -> ExtractedDocument
                     else:
                         bbox = (0, 0, 0, 0)
                     
-                    images.append(ExtractedImage(
-                        image_b64=image_b64,
-                        image_type=image_ext,
-                        bbox=bbox,
-                        page_num=page_num + 1,
-                        width=base_image.get("width"),
-                        height=base_image.get("height")
-                    ))
-                    total_images += 1
+                    # Filter by minimum size
+                    img_width = base_image.get("width", 0)
+                    img_height = base_image.get("height", 0)
+                    
+                    if img_width >= min_image_size and img_height >= min_image_size:
+                        images.append(ExtractedImage(
+                            image_b64=image_b64,
+                            image_type=image_ext,
+                            bbox=bbox,
+                            page_num=page_num + 1,
+                            width=img_width,
+                            height=img_height
+                        ))
+                        total_images += 1
                     
                 except Exception as e:
                     print(f"Warning: Could not extract image xref={xref} on page {page_num + 1}: {e}")
