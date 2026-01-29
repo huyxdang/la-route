@@ -1,5 +1,6 @@
 # Core
 mistralai>=1.0.0
+mistral-common[sentencepiece]>=1.0.0
 python-dotenv>=1.0.0
 tenacity>=8.0.0
 
