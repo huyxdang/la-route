@@ -5,7 +5,8 @@ Runs Mistral models on DocBench PDFs with full multimodal support (text + images
 
 Usage:
 (1) Run the first time / fresh start:
-    python run_mistral.py --model ministral-8b-latest --start 0 --end 228  
+    python run_mistral.py --model ministral-8b-latest --start 0 --end 228
+    python run_mistral.py --model mistral-large-latest --start 0 --end 228 --no-images
     python run_mistral.py --model mistral-large-latest --start 0 --end 228 --workers 2 --no-resume
 
 (2) Resume from previous run:
@@ -86,7 +87,7 @@ def get_domain_folders(domain: str) -> list[int]:
 class MistralRunner:
     """Runs Mistral models on DocBench documents with multimodal support."""
     
-    def __init__(self, model_name: str, max_images: int = 8, min_image_size: int = 200, workers: int = 1):
+    def __init__(self, model_name: str, max_images: int = 8, min_image_size: int = 200, workers: int = 1, include_images: bool = True):
         api_key = os.getenv("MISTRAL_API_KEY")
         if not api_key:
             raise ValueError("MISTRAL_API_KEY not found in environment")
@@ -97,6 +98,7 @@ class MistralRunner:
         self.max_images = max_images
         self.min_image_size = min_image_size
         self.workers = workers
+        self.include_images = include_images
         
         # Semantic chunker for large documents (lazy init)
         self._chunker = None
@@ -106,7 +108,8 @@ class MistralRunner:
         self.total_output_tokens = 0
         self._lock = threading.Lock()
         
-        logger.info(f"Initialized MistralRunner with model: {self.model}, workers: {workers}")
+        mode = "text+images" if include_images else "text-only"
+        logger.info(f"Initialized MistralRunner with model: {self.model}, workers: {workers}, mode: {mode}")
     
     @property
     def chunker(self) -> SemanticChunker:
@@ -126,7 +129,7 @@ class MistralRunner:
     def get_document_content(self, folder: str, data_dir: str) -> list[dict]:
         """Extract text and images from PDF."""
         pdf_path = self.get_pdf_path(folder, data_dir)
-        doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size)
+        doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size, extract_images=self.include_images)
         
         content = []
         
@@ -142,44 +145,36 @@ class MistralRunner:
                 "text": "## Document Content:\n\n" + "\n\n---\n\n".join(text_parts)
             })
         
-        # Add images with page annotations
-        image_count = 0
-        for page in doc.pages:
-            for img in page.images:
+        # Add images with page annotations (only if enabled)
+        if self.include_images:
+            image_count = 0
+            for page in doc.pages:
+                for img in page.images:
+                    if image_count >= self.max_images:
+                        break
+                    
+                    content.append({
+                        "type": "text",
+                        "text": f"[Figure from page {img.page_num}]"
+                    })
+                    
+                    mime_type = f"image/{img.image_type}"
+                    if img.image_type == "jpg":
+                        mime_type = "image/jpeg"
+                    
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{img.image_b64}"
+                        }
+                    })
+                    image_count += 1
+                
                 if image_count >= self.max_images:
                     break
-                
-                content.append({
-                    "type": "text",
-                    "text": f"[Figure from page {img.page_num}]"
-                })
-                
-                mime_type = f"image/{img.image_type}"
-                if img.image_type == "jpg":
-                    mime_type = "image/jpeg"
-                
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{mime_type};base64,{img.image_b64}"
-                    }
-                })
-                image_count += 1
             
-            if image_count >= self.max_images:
-                break
-        
-        if image_count > 0:
-            logger.info(f"  Included {image_count} image(s)")
-        
-        # Log content size for debugging
-        total_text_len = sum(len(c.get("text", "")) for c in content if c.get("type") == "text")
-        total_images = sum(1 for c in content if c.get("type") == "image_url")
-        total_image_bytes = sum(
-            len(c.get("image_url", {}).get("url", "")) 
-            for c in content if c.get("type") == "image_url"
-        )
-        logger.debug(f"  Content: {total_text_len} chars text, {total_images} images, ~{total_image_bytes//1024}KB image data")
+            if image_count > 0:
+                logger.info(f"  Included {image_count} image(s)")
         
         return content
     
@@ -266,7 +261,7 @@ class MistralRunner:
         try:
             questions = self.get_questions(folder, data_dir)
             pdf_path = self.get_pdf_path(folder, data_dir)
-            doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size)
+            doc = extract_pdf(str(pdf_path), min_image_size=self.min_image_size, extract_images=self.include_images)
         except FileNotFoundError as e:
             logger.error(f"Skipping folder {folder}: {e}")
             return []
@@ -308,7 +303,7 @@ class MistralRunner:
                 if use_rag and retriever:
                     # RAG mode: retrieve relevant chunks + page images
                     chunks, pages = retriever.retrieve(question)
-                    rag_content = build_rag_content(chunks, doc, pages, self.max_images)
+                    rag_content = build_rag_content(chunks, doc, pages, self.max_images, self.include_images)
                     answer, input_tokens, output_tokens = self.call_mistral(
                         rag_content, question, folder=folder
                     )
@@ -382,7 +377,10 @@ class MistralRunner:
         if output_dir is None:
             output_dir = data_dir
         
-        output_file = Path(output_dir) / f"{self.model_short}_results.jsonl"
+        # If running a domain slice, write to a domain-specific results file so
+        # finance/legal/etc. runs don't mix into one giant JSONL.
+        output_suffix = f"_{domain}" if domain else ""
+        output_file = Path(output_dir) / f"{self.model_short}{output_suffix}_results.jsonl"
         
         # Filter by domain if specified
         if domain:
@@ -523,6 +521,11 @@ def main():
         choices=list(DOMAINS.keys()),
         help="Filter by domain: academic (49 docs), finance (40 docs), government (44 docs), legal (46 docs), news (50 docs)"
     )
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Disable image extraction and inclusion (text-only mode, faster and avoids rate limits)"
+    )
     
     args = parser.parse_args()
     
@@ -530,7 +533,8 @@ def main():
         model_name=args.model,
         max_images=args.max_images,
         min_image_size=args.min_image_size,
-        workers=args.workers
+        workers=args.workers,
+        include_images=not args.no_images
     )
     runner.run(
         data_dir=args.data_dir,

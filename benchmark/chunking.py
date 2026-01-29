@@ -300,7 +300,8 @@ def build_rag_content(
     chunks: list[Chunk],
     doc,  # ExtractedDocument
     retrieved_pages: set[int],
-    max_images: int = 8
+    max_images: int = 8,
+    include_images: bool = True
 ) -> list[dict]:
     """
     Build Mistral API content from retrieved chunks and page-associated images.
@@ -310,6 +311,7 @@ def build_rag_content(
         doc: Original ExtractedDocument (for images)
         retrieved_pages: Set of page numbers covered by chunks
         max_images: Maximum images to include
+        include_images: Whether to include images (default: True)
         
     Returns:
         Content list for Mistral chat API
@@ -328,35 +330,36 @@ def build_rag_content(
             "text": "## Retrieved Document Excerpts:\n\n" + "\n\n---\n\n".join(text_parts)
         })
     
-    # 2. Add images from retrieved pages only
-    image_count = 0
-    for page in doc.pages:
-        if page.page_num not in retrieved_pages:
-            continue
-        
-        for img in page.images:
+    # 2. Add images from retrieved pages only (if enabled)
+    if include_images:
+        image_count = 0
+        for page in doc.pages:
+            if page.page_num not in retrieved_pages:
+                continue
+            
+            for img in page.images:
+                if image_count >= max_images:
+                    break
+                
+                content.append({
+                    "type": "text",
+                    "text": f"[Figure from page {img.page_num}]"
+                })
+                
+                mime_type = f"image/{img.image_type}"
+                if img.image_type == "jpg":
+                    mime_type = "image/jpeg"
+                
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{img.image_b64}"
+                    }
+                })
+                image_count += 1
+            
             if image_count >= max_images:
                 break
-            
-            content.append({
-                "type": "text",
-                "text": f"[Figure from page {img.page_num}]"
-            })
-            
-            mime_type = f"image/{img.image_type}"
-            if img.image_type == "jpg":
-                mime_type = "image/jpeg"
-            
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{mime_type};base64,{img.image_b64}"
-                }
-            })
-            image_count += 1
-        
-        if image_count >= max_images:
-            break
     
     return content
 
