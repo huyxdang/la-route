@@ -24,6 +24,10 @@ pinecone-text>=0.9.0
 
 # Web Search
 tavily-python>=0.5.0
+langchain-tavily>=0.1.0
 
 # Pydantic for structured outputs
 pydantic>=2.0.0
+
+# Reranking
+cohere>=5.0.0
