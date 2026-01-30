@@ -123,6 +123,26 @@ le-route/
 
 ---
 
+## Running extract.py (PDF → chunks)
+
+`extract.py` uses [GROBID](https://grobid.readthedocs.io/) to extract sections (abstract, body) from PDFs. You need GROBID running first.
+
+**1. Start GROBID** (requires [Docker](https://docs.docker.com/get-docker/)):
+
+```bash
+docker run -t --rm -p 8070:8070 lfoppiano/grobid:0.8.0
+```
+
+**2. Run the extractor** (in another terminal):
+
+```bash
+python extract.py --pdf-dir NeurIPS_2025_PDFs --output chunks.jsonl
+```
+
+Options: `-n 5` to process only 5 papers; `--grobid-url URL` if GROBID is not on localhost.
+
+---
+
 ## 🔧 Tech Stack
 
 | Component | Technology |
