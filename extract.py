@@ -1,3 +1,16 @@
+"""
+Chunk + Embed papers with GROBID + mistral-embed
+
+With each chunk, we store the following metadata:
+
+- title: title of paper
+- note_id: unique id of paper
+- decision: decision of paper (oral, poster, etc.)
+- keywords: keywords of paper (comma separated list)
+- url: url of paper (openreview url)
+- tldr: tldr of paper
+"""
+
 import requests
 from lxml import etree
 from pathlib import Path
@@ -101,7 +114,6 @@ def load_paper_metadata(csv_path: str) -> dict[str, dict]:
         "note_id": "note_id",
         "decision": "decision",
         "keywords": "keywords",
-        "affiliations": "affiliations",
         "url": "openreview_url",
         "tldr": "semanticscholar_tldr",
     }
