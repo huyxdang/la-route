@@ -21,6 +21,9 @@ DOC_GRADER_MODEL = "mistral-large-latest"   # Best context understanding
 GEN_GRADER_MODEL = "mistral-small-latest"   # Good balance for grading
 DEFAULT_MODEL = "mistral-large-latest"       # Fallback / generation
 
+MAX_DOC_LENGTH = 2000      # For grading
+MAX_RERANK_LENGTH = 4000   # For Cohere
+MAX_HISTORY_LENGTH = 500   # For query rewriting
 
 # ============== Pydantic Models for Structured Output ==============
 
@@ -195,12 +198,15 @@ class QueryRouter:
     SYSTEM_PROMPT = """You are an expert at routing user questions to the appropriate data source.
 
 You have access to two data sources:
-1. **vectorstore**: Contains indexed technical documents, research papers, and domain-specific content on 
-   Artificial Intelligence and Machine Learning from NeurIPS 2025 Accepted Papers. 
-   Use this for questions about specific papers, technical concepts, indexed materials from the conference from 2025.
+
+1. **vectorstore**: Contains ONLY NeurIPS 2025 accepted papers (6,000+ papers). 
+   Topics: machine learning, deep learning, optimization, reinforcement learning, NLP, computer vision, AI theory.
+   Use this for: questions about NeurIPS 2025 research, methods, architectures, benchmarks, or technical ML concepts.
    
-2. **web_search**: For general knowledge, current events, recent news, or topics not likely in the vectorstore.
-   Use this for questions about recent developments, general facts, or when the query seems outside the indexed domain.
+2. **web_search**: For everything else — other conferences (ICML, ICLR, ACL), other years, 
+   current events, company news, general knowledge, or topics outside academic ML.
+
+Important: The vectorstore contains ONLY NeurIPS 2025. Questions about other venues, years, or non-research topics should use web_search.
 
 Based on the question, decide which source is most appropriate."""
 
@@ -285,7 +291,7 @@ Be lenient - if there's any reasonable connection, mark it as relevant."""
         for i, doc in enumerate(documents):
             content = doc.content if hasattr(doc, 'content') else str(doc)
             # Truncate long documents to avoid token limits
-            content = content[:2000] if len(content) > 2000 else content
+            content = content[:MAX_DOC_LENGTH] if len(content) > MAX_DOC_LENGTH else content
             doc_parts.append(f"[Document {i+1}]\n{content}")
         
         documents_text = "\n\n---\n\n".join(doc_parts)
@@ -417,17 +423,21 @@ class QueryRewriter:
     
     SYSTEM_PROMPT = """You are an expert at reformulating user questions into standalone search queries.
 
+Context: The search targets NeurIPS 2025 academic papers on machine learning and AI.
+
 Your task:
 1. Given a conversation history and the user's latest question, rewrite it as a standalone query
 2. The rewritten query should be self-contained - it should make sense without the conversation history
 3. Preserve the user's original intent and any specific details mentioned
-4. If the question is already standalone, return it with minimal changes
-5. Keep the query concise and search-friendly
+4. Expand abbreviations when helpful for search (e.g., "RL" → "reinforcement learning", "LLM" → "large language model")
+5. If the question is already standalone, return it with minimal changes
+6. Keep the query concise and search-friendly — remove filler words
 
 Examples:
-- History: "Tell me about GPT-4" / User: "What about its MMLU score?" → "What is GPT-4's MMLU benchmark score?"
-- History: "Compare Claude and GPT-4" / User: "Which one is better at coding?" → "Compare Claude vs GPT-4 coding abilities and benchmarks"
-- User: "What is RAG?" (no history) → "What is Retrieval Augmented Generation (RAG)?" """
+- History: "Tell me about GPT-4" / User: "What about its MMLU score?" → "GPT-4 MMLU benchmark performance"
+- History: "Papers on RLHF" / User: "Any from DeepMind?" → "DeepMind reinforcement learning from human feedback RLHF"
+- User: "What is RAG?" → "retrieval augmented generation RAG"
+- User: "How do LLMs handle long context?" → "large language models long context handling techniques" """
 
     def __init__(self, model: str = REWRITER_MODEL):
         self.model = model
@@ -461,7 +471,7 @@ Examples:
             history_parts = []
             for msg in history[-6:]:  # Last 3 turns max (6 messages)
                 role = msg.get("role", "user").upper()
-                content = msg.get("content", "")[:500]  # Truncate long messages
+                content = msg.get("content", "")[:MAX_HISTORY_LENGTH]  # Truncate long messages
                 history_parts.append(f"{role}: {content}")
             history_text = "\n".join(history_parts)
         
@@ -541,7 +551,7 @@ class DocumentReranker:
         doc_texts = []
         for doc in documents:
             content = doc.content if hasattr(doc, 'content') else str(doc)
-            doc_texts.append(content[:4000])  # Cohere has token limits
+            doc_texts.append(content[:MAX_RERANK_LENGTH])  # Cohere has token limits
         
         response = client.rerank(
             model=self.cohere_model,

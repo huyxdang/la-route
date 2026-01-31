@@ -39,3 +39,5 @@ requests>=2.31.0
 requests 
 lxml 
 pandas
+
+pinecone-text
