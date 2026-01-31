@@ -14,7 +14,7 @@ load_dotenv()
 NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 MISTRAL_EMBED_MODEL = "mistral-embed"
 EMBED_BATCH_SIZE = 50
-MAX_CHARS_PER_CHUNK = 24000
+MAX_CHARS_PER_CHUNK = 16000  # ~4K tokens, safely under 8192 limit
 
 
 def get_mistral_client() -> Mistral:
@@ -98,6 +98,7 @@ def load_paper_metadata(csv_path: str) -> dict[str, dict]:
     
     fields = {
         "title": "title",
+        "note_id": "note_id",
         "decision": "decision",
         "keywords": "keywords",
         "affiliations": "affiliations",
@@ -157,7 +158,7 @@ def check_grobid(url: str) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Extract paper sections via GROBID and embed with Mistral")
-    parser.add_argument("--pdf-dir", type=str, default="papers")
+    parser.add_argument("--pdf-dir", type=str, default="papers/")
     parser.add_argument("--output", type=str, default="chunks.jsonl")
     parser.add_argument("-n", type=int, default=None)
     parser.add_argument("--grobid-url", type=str, default="http://localhost:8070")
@@ -204,48 +205,61 @@ def main():
     print(f"Processing {len(pdf_files)} papers...")
     
     mode = "a" if processed else "w"
+    errors = []
+    
     with open(args.output, mode) as f:
         for i, pdf_path in enumerate(pdf_files):
             print(f"[{i+1}/{len(pdf_files)}] {pdf_path.name}")
             
-            metadata = find_paper_metadata(pdf_path.stem, paper_lookup)
-            sections = parse_grobid(str(pdf_path), grobid_url)
+            try:
+                metadata = find_paper_metadata(pdf_path.stem, paper_lookup)
+                sections = parse_grobid(str(pdf_path), grobid_url)
+                
+                if not sections:
+                    print("  → 0 sections (skipped)")
+                    continue
+                
+                # Build chunks - use note_id for short, unique IDs
+                chunks = []
+                note_id = metadata.get("note_id", pdf_path.stem[:20])
+                chunk_idx = 0
+                for section in sections:
+                    for part_idx, text_part in enumerate(split_long_text(section["content"], args.chunk_size)):
+                        chunk_id = f"{note_id}_{chunk_idx:03d}"
+                        chunk_idx += 1
+                        
+                        chunks.append({
+                            "id": chunk_id,
+                            "text": text_part,
+                            "metadata": {**metadata, "source_file": pdf_path.stem, "section": section["section"]}
+                        })
+                
+                # Embed
+                if mistral_client:
+                    texts = [c["text"] for c in chunks]
+                    embeddings = []
+                    for j in range(0, len(texts), EMBED_BATCH_SIZE):
+                        embeddings.extend(embed_texts(mistral_client, texts[j:j + EMBED_BATCH_SIZE]))
+                    for chunk, emb in zip(chunks, embeddings):
+                        chunk["embedding"] = emb
+                
+                # Write
+                for chunk in chunks:
+                    f.write(json.dumps(chunk) + "\n")
+                f.flush()
+                
+                print(f"  → {len(chunks)} chunks" + (" (embedded)" if mistral_client else ""))
             
-            if not sections:
-                print("  → 0 sections (skipped)")
+            except Exception as e:
+                print(f"  → ERROR: {e}")
+                errors.append((pdf_path.name, str(e)))
                 continue
-            
-            # Build chunks
-            chunks = []
-            for section in sections:
-                for part_idx, text_part in enumerate(split_long_text(section["content"], args.chunk_size)):
-                    chunk_id = f"{pdf_path.stem}_{section['section']}"
-                    if part_idx > 0:
-                        chunk_id += f"_part{part_idx + 1}"
-                    
-                    chunks.append({
-                        "id": chunk_id,
-                        "text": text_part,
-                        "metadata": {**metadata, "source_file": pdf_path.stem, "section": section["section"]}
-                    })
-            
-            # Embed
-            if mistral_client:
-                texts = [c["text"] for c in chunks]
-                embeddings = []
-                for i in range(0, len(texts), EMBED_BATCH_SIZE):
-                    embeddings.extend(embed_texts(mistral_client, texts[i:i + EMBED_BATCH_SIZE]))
-                for chunk, emb in zip(chunks, embeddings):
-                    chunk["embedding"] = emb
-            
-            # Write
-            for chunk in chunks:
-                f.write(json.dumps(chunk) + "\n")
-            f.flush()
-            
-            print(f"  → {len(chunks)} chunks" + (" (embedded)" if mistral_client else ""))
     
     print(f"Done. Output: {args.output}")
+    if errors:
+        print(f"Errors: {len(errors)} papers failed")
+        for name, err in errors[:10]:
+            print(f"  - {name}: {err[:50]}...")
 
 
 if __name__ == "__main__":
