@@ -6,3 +6,7 @@ crag/_pycache/
 neurips_2025.csv
 papers/
 __pycache__/
+test_chunks.jsonl
+chunks.jsonl
+pipeline_*.log
+download_failures.json
