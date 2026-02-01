@@ -2,19 +2,15 @@
   <img src="public/Paper-Rag-logo.png" alt="PaperRAG Logo" width="280"/>
 </p>
 
-<h1 align="center">PaperRAG</h1>
-
 <p align="center">
-  <strong>A Corrective RAG System for NeurIPS 2025 Research Papers</strong>
+  <strong>A RAG system to explore research papers in AI</strong>
 </p>
 
 <p align="center">
   <a href="#overview">Overview</a> •
   <a href="#corrective-rag-flow">Corrective RAG Flow</a> •
   <a href="#pipeline-flow">Pipeline Flow</a> •
-  <a href="#tech-stack">Tech Stack</a> •
-  <a href="#project-structure">Project Structure</a> •
-  <a href="#license">License</a>
+  <a href="#tech-stack">Tech Stack</a>
 </p>
 
 ---
