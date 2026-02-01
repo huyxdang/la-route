@@ -4,14 +4,8 @@ mistral-common[sentencepiece]>=1.0.0
 python-dotenv>=1.0.0
 tenacity>=8.0.0
 
-# PDF Processing
-pymupdf>=1.23.0
-
 # ML
 numpy>=1.24.0
-torch>=2.0.0
-openreview-downloader
-openreview-py>=1.0.0
 
 # CRAG - LangGraph and LangChain
 langgraph>=0.2.0
@@ -39,8 +33,3 @@ redis>=5.0.0
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 sse-starlette>=2.0.0
-
-# Data Processing
-requests>=2.31.0
-lxml
-pandas

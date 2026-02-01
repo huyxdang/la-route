@@ -317,7 +317,7 @@ Instructions:
 ## Answer:"""
 
         response = mistral_client.chat.complete(
-            model=DEFAULT_MODEL,
+            model=GENERATION_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}

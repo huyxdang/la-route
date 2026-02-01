@@ -16,7 +16,7 @@ export function Header({ onNewChat, paperCount = 6142 }: HeaderProps) {
     <header className="h-12 border-b border-zinc-200 flex items-center justify-between px-4 bg-white select-none z-40 relative shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-3">
-        <div className="font-pixel text-red-600 text-[10px] tracking-tighter pt-1">
+        <div className="font-pixel text-red-600 text-[14px] tracking-tighter pt-1">
           Paper<span className="text-zinc-900">RAG</span>
         </div>
       </div>
