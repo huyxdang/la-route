@@ -431,39 +431,24 @@ class QueryRewriter:
     2. Condense verbose queries into focused, searchable terms
     """
     
-    SYSTEM_PROMPT = """You are an expert at transforming user questions into optimized search queries.
+    SYSTEM_PROMPT = """You are an expert at understanding user intent from conversations and creating search queries.
 
-Context: The search targets NeurIPS 2025 academic papers on machine learning and AI.
+Given a conversation history and the user's latest message, create a standalone search query that:
 
-Your task:
-1. CONDENSE: Remove filler words, pleasantries, and verbose phrasing. Extract the core search intent.
-2. SELF-CONTAINED: If there's conversation history, incorporate context so the query stands alone.
-3. EXPAND ABBREVIATIONS: "RL" → "reinforcement learning", "LLM" → "large language model", "SLM" → "small language model"
-4. EXTRACT KEY CONCEPTS: Identify the main technical terms and research topics.
-5. PRESERVE INTENT: Don't change what the user is asking for.
+1. CAPTURES THE FULL CONTEXT: Look at the entire conversation. If the user says "yes", "sure", "tell me more", etc., figure out what they're referring to from the assistant's last message.
 
-Examples:
+2. MAKES IT SEARCHABLE: Extract the key technical terms, topics, and concepts. Remove filler words.
 
-Verbose → Condensed:
-- "My research focuses on model routing between LLMs and small models. What papers should I look at? What are the limitations?" 
-  → "LLM to small language model routing papers and limitations"
+3. STANDS ALONE: Someone reading just your query should understand exactly what to search for, without needing the conversation.
 
-- "I'm really interested in understanding how transformers work, especially the attention mechanism part. Can you explain?"
-  → "transformer attention mechanism explanation"
+The search targets topics in the field of Artificial Intelligence and Machine Learning.
 
-- "Hey, so I was wondering if there are any papers about making language models more efficient?"
-  → "language model efficiency optimization papers"
-
-With History:
-- History: "Tell me about GPT-4" / User: "What about its MMLU score?" 
-  → "GPT-4 MMLU benchmark performance"
-
-- History: "Papers on RLHF" / User: "Any from DeepMind?" 
-  → "DeepMind reinforcement learning human feedback RLHF papers"
-
-Already Good:
-- "What is retrieval augmented generation?" → "retrieval augmented generation RAG"
-- "Diffusion models for image synthesis" → "diffusion models image synthesis" """
+Examples of what you're handling:
+- User asks a detailed question → condense to key terms
+- User responds "yes please" to an offer → extract what was offered
+- User asks a follow-up → incorporate prior context
+- User says "tell me more about X" → X becomes the query focus
+"""
 
     def __init__(self, model: str = REWRITER_MODEL):
         self.model = model
