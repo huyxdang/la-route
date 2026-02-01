@@ -7,9 +7,23 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js"/>
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/Mistral_AI-FF7000?style=for-the-badge&logo=mistral&logoColor=white" alt="Mistral AI"/>
+  <img src="https://img.shields.io/badge/LangGraph-1C3C3C?style=for-the-badge&logo=langchain&logoColor=white" alt="LangGraph"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Pinecone-000000?style=for-the-badge&logo=pinecone&logoColor=white" alt="Pinecone"/>
+  <img src="https://img.shields.io/badge/Cohere-39594D?style=for-the-badge&logo=cohere&logoColor=white" alt="Cohere"/>
+  <img src="https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis"/>
+  <img src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel"/>
+  <img src="https://img.shields.io/badge/Railway-0B0D0E?style=for-the-badge&logo=railway&logoColor=white" alt="Railway"/>
+</p>
+
+<p align="center">
   <a href="#overview">Overview</a> •
-  <a href="#corrective-rag-flow">Corrective RAG Flow</a> •
-  <a href="#pipeline-flow">Pipeline Flow</a> •
+  <a href="#rag-flow">RAG Flow</a> •
   <a href="#tech-stack">Tech Stack</a>
 </p>
 
@@ -28,27 +42,6 @@ Powered by **Mistral models** (Mistral Large, Mistral Small, Ministral 3B, Mistr
 <p>
   <img src="public/RAG-flow.jpg" alt="Rag-workflow"/>
 </p>
-
-### Pipeline Flow
-
-1. **Query Rewriting** — Transforms users questions into search queries using conversation history + user's intent, to make downstream retrieval more accurate.
-
-2. **Query Routing** — Classifies queries into three paths:
-   - `conversational`: Greetings, off-topic → Direct LLM response
-   - `vectorstore`: Research questions (that are available in VectorDB) → Full RAG pipeline
-   - `web_search`: Other → Web search fallback
-
-3. **Hybrid Retrieval** — Combines semantic (dense) and keyword (BM25 sparse) search via Pinecone
-
-4. **Reranking** — Cohere Rerank v3.5 reorders documents by relevance
-
-5. **Document Grading** — LLM evaluates each document's relevance; triggers web search if insufficient
-
-6. **Answer Generation** — Streams response with inline citations `[1]`, `[2]`, etc.
-
-7. **Citation Extraction** — Parses structured citation metadata from LLM output
-
-8. **Generation Grading** — Validates answer for grounding (hallucination check) and usefulness
 
 ## Features
 
