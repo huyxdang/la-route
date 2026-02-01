@@ -1,0 +1,29 @@
+# Frontend (deployed separately on Vercel)
+frontend/
+
+# Benchmark and test files
+benchmark/
+
+# Data files
+*.pkl
+*.pdf
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.cursor/
+.vscode/
+
+# Git
+.git/
+
+# Misc
+.DS_Store
+*.log
