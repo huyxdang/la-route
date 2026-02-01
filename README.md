@@ -26,7 +26,7 @@ Powered by **Mistral models** (Mistral Large, Mistral Small, Ministral 3B, Mistr
 ## RAG Flow
 
 <p>
-  <img src="public/RAG-flow.png" alt="Rag-workflow"/>
+  <img src="public/RAG-flow.jpg" alt="Rag-workflow"/>
 </p>
 
 ### Pipeline Flow
