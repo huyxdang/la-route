@@ -24,6 +24,7 @@
 <p align="center">
   <a href="#overview">Overview</a> •
   <a href="#rag-flow">RAG Flow</a> •
+  <a href="#chunk_&_embed">Chunk & Embed </a> •
   <a href="#tech-stack">Tech Stack</a>
 </p>
 
@@ -33,7 +34,7 @@
 
 PaperRAG is a production-ready Retrieval-Augmented Generation (RAG) system that enables conversational exploration of ~6,000 NeurIPS 2025 research papers. 
 
-Implements **Adaptive RAG** ([paper](https://arxiv.org/pdf/2403.14403)), **Corrective RAG** ([paper](https://arxiv.org/pdf/2401.15884)), and **Self-RAG** ([paper](https://arxiv.org/pdf/2310.11511)), orchestrated with LangGraph. 
+It is built upon an **agentic RAG workflow**, combining  Adaptive RAG ([paper](https://arxiv.org/pdf/2403.14403)), Corrective RAG ([paper](https://arxiv.org/pdf/2401.15884)), and Self-RAG ([paper](https://arxiv.org/pdf/2310.11511)). The system is orchestrated by LangGraph.
 
 Powered by **Mistral models** (Mistral Large, Mistral Small 3.2, Ministral 3B, Mistral Embed), Cohere (Re-ranker) and Tavily (Web-search).
 
@@ -51,6 +52,12 @@ Powered by **Mistral models** (Mistral Large, Mistral Small 3.2, Ministral 3B, M
 - **Hybrid Search** — Best of semantic understanding + keyword matching
 - **Corrective RAG** — Self-healing pipeline with fallback strategies
 - **Latency Tracking** — Per-step timing metrics in the RAG console
+
+## Chunk & Embed
+<p>
+  <img src="public/chunk_embed.png" alt="chunk-embed"/>
+</p>
+
 
 ## Tech Stack
 
