@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A RAG system to explore research papers in AI</strong>
+  <strong>Agentic RAG for exploring 6,000 NeurIPS 2025 papers — built on Mistral models end-to-end</strong>
 </p>
 
 <p align="center">
@@ -22,89 +22,130 @@
 </p>
 
 <p align="center">
-  <a href="#overview">Overview</a> •
-  <a href="#rag-workflow">RAG Workflow</a> •
-  <a href="#chunk_&_embed">Chunk & Embed </a> •
-  <a href="#tech-stack">Tech Stack</a>
+  <a href="#why-this-exists">Why This Exists</a> •
+  <a href="#mistral-core">Mistral-Core</a> •
+  <a href="#agentic-rag-workflow">Agentic RAG Workflow</a> •
+  <a href="#chunk--embed-pipeline">Chunk & Embed</a> •
+  <a href="#features">Features</a> •
+  <a href="#architecture">Architecture</a>
 </p>
 
 ---
 
-## Overview
+## Why This Exists
 
-PaperRAG is a production-ready Retrieval-Augmented Generation (RAG) system that enables conversational exploration of ~6,000 NeurIPS 2025 research papers. 
+Most RAG demos retrieve documents and dump them into a prompt. PaperRAG goes further — it **routes**, **retrieves**, **grades**, **generates**, and **self-corrects** in a multi-step agentic loop, falling back to web search when the corpus isn't enough. The result is a system that knows when it doesn't know.
 
-It is built upon an **agentic RAG workflow**, combining  Adaptive RAG ([paper](https://arxiv.org/pdf/2403.14403)), Corrective RAG ([paper](https://arxiv.org/pdf/2401.15884)), and Self-RAG ([paper](https://arxiv.org/pdf/2310.11511)). The system is orchestrated by LangGraph.
+The entire intelligence layer runs on **Mistral models**, from lightweight routing (Ministral 3B) to generation and grading (Mistral Large), with Mistral Embed powering the vector space. This is a deliberate design choice: Mistral's model family covers the full spectrum from fast-and-cheap to powerful-and-precise, making it possible to assign the right model to each pipeline stage without leaving the ecosystem.
 
-Powered by **Mistral models** (Mistral Large, Mistral Small 3.2, Ministral 3B, Mistral Embed), Cohere (Re-ranker) and Tavily (Web-search).
+## Mistral-Core
 
-## RAG WorkFlow
+Every LLM call in the pipeline is a Mistral model, selected by capability-to-cost ratio:
+
+| Pipeline Stage | Model | Why |
+|---|---|---|
+| **Query rewriting + routing** | Mistral Small 3.2 | Rewrites queries with conversation context and routes in a single call — balances speed with contextual understanding |
+| **Document grading** | Mistral Large | Evaluating relevance requires nuanced comprehension of both query intent and document content |
+| **Answer generation** | Mistral Large | Core generation — needs to synthesize across multiple sources with inline citations |
+| **Hallucination check** | Mistral Small 3.2 | Structured yes/no grading against source text — reliable at this model size |
+| **Embeddings** | Mistral Embed | 1024-dim vectors for semantic search across 173,990 chunks |
+
+This tiered approach keeps latency low on the hot path while reserving heavyweight models for the steps that matter most.
+
+## Agentic RAG Workflow
+
+The system implements a LangGraph state machine combining three RAG research papers:
+- [**Adaptive RAG**](https://arxiv.org/pdf/2403.14403) — route queries to the right retrieval strategy
+- [**Corrective RAG**](https://arxiv.org/pdf/2401.15884) — grade retrieved documents and fall back to web search when they're insufficient
+- [**Self-RAG**](https://arxiv.org/pdf/2310.11511) — verify generations against source material and check for hallucinations
 
 <p>
-  <img src="public/RAG-flow.jpg" alt="Rag-workflow"/>
+  <img src="public/RAG-flow.jpg" alt="Agentic RAG workflow"/>
 </p>
 
-## Chunk & Embed
+**Pipeline in detail:**
+
+```
+User query
+  → Rewrite + route in one step (Mistral Small)
+  → Hybrid retrieval: BM25 + dense vectors → top 50 (Pinecone + Mistral Embed)
+  → Rerank: 50 → 10 (Cohere Rerank v3.5)
+  → Grade each document for relevance (Mistral Large)
+  → If insufficient docs → web search fallback (Tavily)
+  → Generate answer with inline citations (Mistral Large)
+  → Verify: grounded in sources? answers the question? (Mistral Small)
+  → Stream response + structured citations to frontend
+```
+
+## Chunk & Embed Pipeline
+
+~6,000 NeurIPS 2025 papers → 173,990 chunks indexed in Pinecone with hybrid sparse-dense search.
+
 <p>
-  <img src="public/chunk_embed.png" alt="chunk-embed"/>
+  <img src="public/chunk_embed.png" alt="Chunking and embedding pipeline"/>
 </p>
 
 ## Features
-- **Process Inspector** - users can see what's happening inside the sytem for **transparency**
-- **Citation** - users can view the answer's sources, including "Claim" and the exact Text from documents, for **trust-worthiness**
-- **Agentic RAG** - answers are constantly checked and verified by Mistral-Large to improve **accuracy** and **relevance**
 
-## Tech Stack
+**Process Inspector** — a real-time console showing every pipeline step with latency metrics. Users see exactly what the system is doing: routing decisions, retrieval counts, grading outcomes, generation timing.
 
-### Backend
-| Component | Technology |
-|-----------|------------|
-| Framework | FastAPI |
-| Streaming | SSE (sse-starlette) |
-| Orchestration | LangGraph |
-| Vector DB | Pinecone (hybrid sparse-dense) |
-| Embeddings | Mistral Embed |
-| Reranking | Cohere Rerank v3.5 |
-| LLMs | Mistral Large, Mistral Small, Ministral 3B |
-| Sessions | Redis |
-| Web Search | Tavily |
+**Structured Citations** — inline `[1]`, `[2]` references that expand to show the exact claim, the source quote, document metadata, and a relevance score. Every answer is traceable back to its sources.
 
-### Frontend
-| Component | Technology |
-|-----------|------------|
-| Framework | Next.js 14 (App Router) |
-| Styling | Tailwind CSS |
-| Components | shadcn/ui |
-| Fonts | JetBrains Mono, Press Start 2P |
-| Streaming | EventSource API |
-| Markdown | react-markdown |
+**Self-Correcting Generation** — answers are checked for hallucination (is the response grounded in the retrieved documents?) and usefulness (does it actually answer the question?). Failed checks trigger re-generation with a retry limit.
 
+**Session Persistence** — conversation history stored in Redis, included in the query rewriting step so follow-up questions resolve correctly ("tell me more about that paper" works).
 
-## Project Structure
+## Architecture
+
+### Backend (Python / FastAPI)
 
 ```
-la-route/
-├── crag/                    # Backend package
-│   ├── api.py               # FastAPI endpoints
-│   ├── streaming.py         # SSE streaming pipeline
-│   ├── graders.py           # Router, rewriter, graders
-│   ├── retrieval.py         # Pinecone hybrid retriever
-│   ├── citations.py         # Citation extraction
-│   ├── session.py           # Session management
-│   ├── config.py            # Model configurations
-│   └── graph.py             # LangGraph workflow
-├── frontend/                # Next.js frontend
-│   ├── src/
-│   │   ├── app/             # Next.js app router
-│   │   ├── components/      # React components
-│   │   ├── hooks/           # Custom hooks (useChat)
-│   │   └── lib/             # API client
-├── public/                  # Static assets
-├── requirements.txt         # Python dependencies
-├── Procfile                 # Railway start command
-└── README.md
+crag/
+├── api.py              # FastAPI endpoints — /chat/stream (SSE), sessions CRUD
+├── graph.py            # LangGraph state machine — the agentic RAG loop
+├── graph_state.py      # TypedDict defining the graph state schema
+├── streaming.py        # SSE event pipeline with per-step latency tracking
+├── graders.py          # Pydantic-structured LLM calls for routing, grading, rewriting
+├── retrieval.py        # Pinecone hybrid search (sparse BM25 + dense embeddings)
+├── citations.py        # Citation extraction from generated text
+├── session.py          # Redis / in-memory session management
+├── config.py           # All model assignments, system prompts, pipeline params
+└── main.py             # CLI for local testing
 ```
+
+### Frontend (Next.js / TypeScript)
+
+```
+frontend/src/
+├── app/                # Next.js App Router — layout, page, global styles
+├── components/
+│   ├── chat/           # ChatContainer, MessageBubble, ChatInput, StreamingStatus
+│   ├── Header.tsx      # Logo, paper count, new chat
+│   ├── Inspector.tsx   # Citation detail panel (claim, quote, source, score)
+│   └── RAGConsole.tsx  # Pipeline log sidebar — retro terminal aesthetic
+├── hooks/
+│   └── useChat.ts      # SSE connection, event parsing, state management
+├── lib/
+│   └── api.ts          # Backend API client
+└── types/
+    └── chat.ts         # TypeScript interfaces
+```
+
+### Tech Stack
+
+| Layer | Technology | Role |
+|---|---|---|
+| LLMs | Mistral Large, Mistral Small 3.2 | Generation, grading, routing |
+| Embeddings | Mistral Embed | 1024-dim semantic vectors |
+| Orchestration | LangGraph | Agentic state machine with conditional edges |
+| Vector DB | Pinecone | Hybrid sparse-dense search |
+| Reranking | Cohere Rerank v3.5 | Cross-encoder precision reranking |
+| Web Search | Tavily | Fallback for out-of-corpus queries |
+| Backend | FastAPI + SSE | Streaming API server |
+| Frontend | Next.js 14, React 19, Tailwind, shadcn/ui | Chat UI with inspector |
+| Sessions | Redis | Conversation history persistence |
+| Deployment | Railway (backend) + Vercel (frontend) | Production hosting |
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
