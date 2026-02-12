@@ -442,10 +442,22 @@ class PipelineStreamer:
         
         try:
             results = self.web_search_tool.invoke({"query": state["question"]})
-            
+
             # Parse results into documents
             web_docs = []
-            if isinstance(results, str):
+            # TavilySearch returns a dict with a "results" key
+            if isinstance(results, dict):
+                for r in results.get("results", []):
+                    content = r.get("content", "") or r.get("snippet", "")
+                    url = r.get("url", "")
+                    title = r.get("title", "")
+                    if content:
+                        web_docs.append(Document(
+                            content=content,
+                            metadata={"source": "web", "url": url, "title": title},
+                            source="web",
+                        ))
+            elif isinstance(results, str):
                 web_docs.append(Document(content=results, metadata={"source": "web"}, source="web"))
             elif isinstance(results, list):
                 for r in results:

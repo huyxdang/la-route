@@ -203,8 +203,23 @@ def create_crag_graph(
             search_results = web_search_tool.invoke({"query": question})
             
             # Handle different return formats from Tavily
-            if isinstance(search_results, str):
-                # Single string result - use as one document
+            # TavilySearch returns a dict with a "results" key
+            if isinstance(search_results, dict):
+                count = 0
+                for result in search_results.get("results", []):
+                    content = result.get("content", "") or result.get("snippet", "")
+                    url = result.get("url", "")
+                    title = result.get("title", "")
+                    if content:
+                        doc = Document(
+                            content=content,
+                            metadata={"url": url, "title": title, "source": "web"},
+                            source="web"
+                        )
+                        documents.append(doc)
+                        count += 1
+                print(f"  Added {count} web results")
+            elif isinstance(search_results, str):
                 doc = Document(
                     content=search_results,
                     metadata={"source": "web"},
@@ -213,17 +228,14 @@ def create_crag_graph(
                 documents.append(doc)
                 print(f"  Added 1 web result (string)")
             elif isinstance(search_results, list):
-                # List of results
                 count = 0
                 for result in search_results:
                     if isinstance(result, dict):
                         content = result.get("content", "") or result.get("snippet", "") or str(result)
                         url = result.get("url", "")
                     else:
-                        # String or other type
                         content = str(result)
                         url = ""
-                    
                     if content:
                         doc = Document(
                             content=content,
@@ -233,15 +245,6 @@ def create_crag_graph(
                         documents.append(doc)
                         count += 1
                 print(f"  Added {count} web results")
-            else:
-                # Unknown format - try to use as string
-                doc = Document(
-                    content=str(search_results),
-                    metadata={"source": "web"},
-                    source="web"
-                )
-                documents.append(doc)
-                print(f"  Added 1 web result (converted)")
             
         except Exception as e:
             print(f"  Web search error: {e}")
