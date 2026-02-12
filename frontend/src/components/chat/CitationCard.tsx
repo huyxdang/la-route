@@ -108,28 +108,58 @@ interface CitationBadgeProps {
   refNum: number;
   onClick?: () => void;
   isActive?: boolean;
+  citation?: Citation;
 }
 
 /**
- * Inline clickable citation badge.
+ * Inline clickable citation badge with hover preview.
  */
-export function CitationBadge({ refNum, onClick, isActive }: CitationBadgeProps) {
+export function CitationBadge({ refNum, onClick, isActive, citation }: CitationBadgeProps) {
+  const [showPreview, setShowPreview] = useState(false);
+
   return (
-    <button
-      onClick={onClick}
-      className={`
-        inline-flex items-center justify-center
-        text-xs font-medium
-        px-1.5 py-0.5 rounded
-        transition-colors
-        ${
-          isActive
-            ? "bg-primary text-primary-foreground"
-            : "bg-primary/10 text-primary hover:bg-primary/20"
-        }
-      `}
+    <span
+      className="relative inline-block"
+      onMouseEnter={() => setShowPreview(true)}
+      onMouseLeave={() => setShowPreview(false)}
     >
-      [{refNum}]
-    </button>
+      <button
+        onClick={onClick}
+        className={`
+          inline-flex items-center justify-center
+          text-xs font-medium
+          px-1.5 py-0.5 rounded
+          transition-colors
+          ${
+            isActive
+              ? "bg-primary text-primary-foreground"
+              : "bg-primary/10 text-primary hover:bg-primary/20"
+          }
+        `}
+      >
+        [{refNum}]
+      </button>
+      {showPreview && citation?.source && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-white border border-zinc-200 rounded-sm shadow-lg z-50 pointer-events-none">
+          <div className="text-[10px] font-mono text-zinc-400 mb-1">
+            [{refNum}]
+            {citation.source.relevance_score ? (
+              <span className="text-emerald-600 ml-2">
+                {Math.round(citation.source.relevance_score * 100)}% match
+              </span>
+            ) : null}
+          </div>
+          <div className="text-xs font-bold text-zinc-900 line-clamp-2 leading-tight">
+            {citation.source.title || `Source ${refNum}`}
+          </div>
+          {citation.claim && (
+            <div className="text-[11px] text-zinc-500 line-clamp-2 mt-1">
+              {citation.claim}
+            </div>
+          )}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-200" />
+        </div>
+      )}
+    </span>
   );
 }

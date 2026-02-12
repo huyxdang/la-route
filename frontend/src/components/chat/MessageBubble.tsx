@@ -87,6 +87,7 @@ function TextWithCitations({
                 refNum={refNum}
                 isActive={activeCitation === refNum}
                 onClick={() => onCitationClick(citation)}
+                citation={citation}
               />
             );
           }

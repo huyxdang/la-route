@@ -323,8 +323,8 @@ For each document (1 to {len(documents)}), is it relevant to the question? Retur
             if score == "yes":
                 relevant_docs.append(doc)
         
-        # If any docs were irrelevant, supplement with web search
-        needs_web_search = len(relevant_docs) < len(documents)
+        # Trigger web search only when no relevant docs remain
+        needs_web_search = len(relevant_docs) == 0
 
         return relevant_docs, needs_web_search
 

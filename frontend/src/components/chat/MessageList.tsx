@@ -5,6 +5,14 @@ import type { Message, Citation } from "@/types/chat";
 import { MessageBubble } from "./MessageBubble";
 import { ArrowRight } from "lucide-react";
 
+const SUGGESTED_QUERIES = [
+  "What are recent advances in RLHF?",
+  "Explain diffusion models for image generation",
+  "Key trends in multi-modal learning",
+  "How does GRPO improve reinforcement learning?",
+  "What are the limitations of current LLMs?",
+];
+
 interface MessageListProps {
   messages: Message[];
   onCitationClick?: (citation: Citation) => void;
@@ -73,8 +81,21 @@ export function HomeView({ onSearch }: HomeViewProps) {
         <SearchInput onSearch={onSearch} />
       </div>
 
+      {/* Suggested Queries */}
+      <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-3xl">
+        {SUGGESTED_QUERIES.map((q) => (
+          <button
+            key={q}
+            onClick={() => onSearch(q)}
+            className="px-3 py-1.5 text-xs font-mono text-zinc-500 bg-white border border-zinc-200 rounded-sm hover:border-red-400 hover:text-red-600 transition-colors"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
       {/* Version info */}
-      <div className="mt-8 text-center opacity-40 hover:opacity-100 transition-opacity">
+      <div className="mt-6 text-center opacity-40 hover:opacity-100 transition-opacity">
         <div className="text-zinc-400 text-[10px] font-mono uppercase tracking-widest">
           5,876 Documents Indexed (NeurIPS '25)
         </div>
